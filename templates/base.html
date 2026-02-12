@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Alpha Productivity{% endblock %}</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0a0a1a;
+            --bg2: #111128;
+            --card: #161633;
+            --card-hover: #1c1c42;
+            --accent: #6c5ce7;
+            --accent2: #a855f7;
+            --accent-glow: rgba(108,92,231,0.15);
+            --grad: linear-gradient(135deg, #6c5ce7, #a855f7);
+            --grad2: linear-gradient(135deg, #6c5ce7, #ec4899);
+            --text: #e8e8f0;
+            --text2: #9898b8;
+            --text3: #5a5a7a;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --border: #2a2a4a;
+            --radius: 14px;
+            --font: 'Inter', -apple-system, sans-serif;
+        }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: var(--font); background: var(--bg); color: var(--text); min-height: 100vh; }
+        a { color: var(--accent); text-decoration: none; }
+
+        .nav {
+            background: rgba(10,10,26,0.9); backdrop-filter: blur(20px);
+            border-bottom: 1px solid var(--border); padding: 0 20px; height: 56px;
+            display: flex; align-items: center; justify-content: space-between;
+            position: sticky; top: 0; z-index: 100;
+        }
+        .nav-logo { font-size: 1.1rem; font-weight: 800; display: flex; align-items: center; gap: 8px; color: var(--text); }
+        .nav-logo span { background: var(--grad); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .nav-right { display: flex; align-items: center; gap: 10px; }
+        .nav-link { color: var(--text2); font-size: 0.85rem; font-weight: 500; padding: 6px 12px; border-radius: 8px; transition: 0.2s; }
+        .nav-link:hover, .nav-link.active { color: var(--text); background: var(--card); }
+
+        .container { max-width: 1000px; margin: 0 auto; padding: 20px; }
+
+        .btn { display: inline-flex; align-items: center; gap: 6px; padding: 10px 20px; border-radius: 10px; font-size: 0.88rem; font-weight: 600; border: none; cursor: pointer; transition: 0.2s; font-family: var(--font); }
+        .btn-primary { background: var(--grad); color: #fff; }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 20px rgba(108,92,231,0.4); }
+        .btn-ghost { background: transparent; color: var(--text2); border: 1px solid var(--border); }
+        .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+        .btn-sm { padding: 7px 14px; font-size: 0.82rem; }
+        .btn-danger { background: rgba(239,68,68,0.15); color: var(--danger); }
+
+        .card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; transition: 0.2s; }
+        .card:hover { border-color: rgba(108,92,231,0.3); }
+
+        .form-input {
+            width: 100%; padding: 11px 14px; background: var(--bg); border: 1.5px solid var(--border);
+            border-radius: 10px; color: var(--text); font-size: 0.9rem; font-family: var(--font); transition: 0.2s;
+        }
+        .form-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+        .form-input::placeholder { color: var(--text3); }
+        select.form-input { cursor: pointer; }
+
+        .flash { padding: 12px 18px; border-radius: 10px; margin-bottom: 14px; font-size: 0.88rem; font-weight: 500; }
+        .flash-error { background: rgba(239,68,68,0.1); color: #f87171; border: 1px solid rgba(239,68,68,0.2); }
+        .flash-success { background: rgba(16,185,129,0.1); color: #34d399; border: 1px solid rgba(16,185,129,0.2); }
+
+        .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+
+        .footer { text-align: center; padding: 30px; color: var(--text3); font-size: 0.8rem; border-top: 1px solid var(--border); margin-top: 40px; }
+
+        @media (max-width: 640px) {
+            .container { padding: 14px; }
+            .nav { padding: 0 14px; }
+        }
+    </style>
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <nav class="nav">
+        <a href="/" class="nav-logo">⚡ <span>Alpha Productivity</span></a>
+        <div class="nav-right">
+            {% if user %}
+                <a href="/dashboard" class="nav-link {% if request.path == '/dashboard' %}active{% endif %}">Dashboard</a>
+                <a href="/logout" class="nav-link">Logout</a>
+            {% else %}
+                <a href="/login" class="nav-link">Login</a>
+                <a href="/signup" class="btn btn-sm btn-primary">Sign Up</a>
+            {% endif %}
+        </div>
+    </nav>
+
+    <main>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+        <div class="container" style="padding-bottom:0;">
+            {% for cat, msg in messages %}
+            <div class="flash flash-{{ cat }}">{{ msg }}</div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="footer">
+        <p>© 2026 <strong>Scott Antwi</strong> · Alpha Productivity ⚡</p>
+    </footer>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

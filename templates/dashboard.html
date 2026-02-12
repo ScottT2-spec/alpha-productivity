@@ -1,0 +1,375 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block extra_css %}
+<style>
+.dash-header { margin-bottom: 20px; }
+.dash-header h1 { font-size: 1.5rem; font-weight: 700; }
+.dash-header p { color: var(--text2); font-size: 0.9rem; }
+
+.stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 12px; margin-bottom: 20px; }
+.stat-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px; text-align: center; }
+.stat-card .num { font-size: 1.8rem; font-weight: 800; background: var(--grad); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.stat-card .label { color: var(--text3); font-size: 0.78rem; font-weight: 500; margin-top: 2px; }
+
+.tabs { display: flex; gap: 4px; margin-bottom: 16px; overflow-x: auto; padding-bottom: 4px; }
+.tab { padding: 8px 16px; border-radius: 8px; font-size: 0.85rem; font-weight: 600; cursor: pointer; color: var(--text3); background: transparent; border: none; font-family: var(--font); white-space: nowrap; transition: 0.2s; }
+.tab.active { background: var(--accent); color: #fff; }
+.tab:hover:not(.active) { color: var(--text); background: var(--card); }
+
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Tasks */
+.task-item { display: flex; align-items: center; gap: 12px; padding: 14px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; transition: 0.2s; }
+.task-item:hover { border-color: rgba(108,92,231,0.3); }
+.task-check { width: 22px; height: 22px; border-radius: 6px; border: 2px solid var(--border); cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: 0.2s; background: transparent; color: transparent; font-size: 0.7rem; }
+.task-check.done { background: var(--success); border-color: var(--success); color: #fff; }
+.task-title { flex: 1; font-size: 0.9rem; font-weight: 500; }
+.task-title.done { text-decoration: line-through; color: var(--text3); }
+.task-priority { font-size: 0.7rem; padding: 3px 8px; border-radius: 6px; font-weight: 600; }
+.priority-high { background: rgba(239,68,68,0.15); color: #f87171; }
+.priority-medium { background: rgba(245,158,11,0.15); color: #fbbf24; }
+.priority-low { background: rgba(16,185,129,0.15); color: #34d399; }
+.task-delete { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 1.1rem; padding: 4px; transition: 0.2s; }
+.task-delete:hover { color: var(--danger); }
+
+/* Add form */
+.add-form { display: flex; gap: 8px; margin-bottom: 16px; }
+.add-form input { flex: 1; }
+
+/* Notes */
+.note-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 10px; cursor: pointer; transition: 0.2s; }
+.note-card:hover { border-color: rgba(108,92,231,0.4); }
+.note-card h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 6px; }
+.note-card p { color: var(--text2); font-size: 0.83rem; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.note-card .meta { color: var(--text3); font-size: 0.75rem; margin-top: 8px; }
+
+/* Habits */
+.habit-item { display: flex; align-items: center; gap: 12px; padding: 14px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; }
+.habit-check { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--border); cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: transparent; font-size: 0.8rem; transition: 0.2s; }
+.habit-check.done { background: var(--accent); border-color: var(--accent); }
+.habit-info { flex: 1; }
+.habit-name { font-size: 0.9rem; font-weight: 600; }
+.habit-streak { font-size: 0.78rem; color: var(--text3); }
+
+/* Goals */
+.goal-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 10px; }
+.goal-card h3 { font-size: 0.95rem; font-weight: 600; margin-bottom: 8px; }
+.progress-bar { height: 8px; background: var(--bg); border-radius: 4px; overflow: hidden; margin-bottom: 6px; }
+.progress-fill { height: 100%; background: var(--grad); border-radius: 4px; transition: width 0.3s; }
+.progress-text { font-size: 0.78rem; color: var(--text3); }
+
+/* AI Chat */
+.chat-container { display: flex; flex-direction: column; height: 400px; }
+.chat-messages { flex: 1; overflow-y: auto; padding: 12px 0; display: flex; flex-direction: column; gap: 10px; }
+.chat-msg { max-width: 85%; padding: 12px 16px; border-radius: 14px; font-size: 0.88rem; line-height: 1.6; white-space: pre-wrap; }
+.chat-msg.user { background: var(--accent); color: #fff; align-self: flex-end; border-radius: 14px 14px 4px 14px; }
+.chat-msg.ai { background: var(--bg2); color: var(--text); align-self: flex-start; border-radius: 14px 14px 14px 4px; border: 1px solid var(--border); }
+.chat-input-row { display: flex; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+
+/* Pomodoro */
+.pomo-display { text-align: center; padding: 30px 0; }
+.pomo-time { font-size: 4rem; font-weight: 800; font-variant-numeric: tabular-nums; background: var(--grad); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.pomo-label { color: var(--text3); font-size: 0.9rem; margin-bottom: 20px; }
+.pomo-btns { display: flex; gap: 10px; justify-content: center; }
+
+/* Note editor modal */
+.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 500; display: none; align-items: center; justify-content: center; padding: 20px; }
+.modal-overlay.open { display: flex; }
+.modal-box { background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 28px; width: 100%; max-width: 500px; max-height: 80vh; overflow-y: auto; }
+.modal-box h2 { margin-bottom: 16px; font-size: 1.1rem; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="container">
+    <div class="dash-header">
+        <h1>👋 Hey{% if user.full_name %}, {{ user.full_name.split()[0] }}{% endif %}!</h1>
+        <p>{{ pending_tasks }} task{{ 's' if pending_tasks != 1 }} pending · {{ done_tasks }} completed · {{ pomodoros_today }} pomodoro{{ 's' if pomodoros_today != 1 }} today</p>
+    </div>
+
+    <div class="stats-row">
+        <div class="stat-card"><div class="num">{{ pending_tasks }}</div><div class="label">Pending</div></div>
+        <div class="stat-card"><div class="num">{{ done_tasks }}</div><div class="label">Completed</div></div>
+        <div class="stat-card"><div class="num">{{ pomodoros_today }}</div><div class="label">Pomodoros</div></div>
+        <div class="stat-card"><div class="num">{{ habits|length }}</div><div class="label">Habits</div></div>
+    </div>
+
+    <div class="tabs">
+        <button class="tab active" onclick="switchTab('tasks')">📋 Tasks</button>
+        <button class="tab" onclick="switchTab('notes')">📝 Notes</button>
+        <button class="tab" onclick="switchTab('habits')">🔥 Habits</button>
+        <button class="tab" onclick="switchTab('goals')">🎯 Goals</button>
+        <button class="tab" onclick="switchTab('pomodoro')">🍅 Pomodoro</button>
+        <button class="tab" onclick="switchTab('ai')">🧠 AI Chat</button>
+    </div>
+
+    <!-- TASKS -->
+    <div class="tab-content active" id="tab-tasks">
+        <div class="add-form">
+            <input type="text" id="taskInput" class="form-input" placeholder="Add a new task..." onkeydown="if(event.key==='Enter')addTask()">
+            <select id="taskPriority" class="form-input" style="width:auto;">
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="low">Low</option>
+            </select>
+            <button class="btn btn-primary btn-sm" onclick="addTask()">Add</button>
+        </div>
+        <div id="taskList">
+            {% for t in tasks %}
+            <div class="task-item" data-id="{{ t.id }}">
+                <button class="task-check {{ 'done' if t.status == 'completed' }}" onclick="toggleTask({{ t.id }}, '{{ 'todo' if t.status == 'completed' else 'completed' }}')">{{ '✓' if t.status == 'completed' }}</button>
+                <span class="task-title {{ 'done' if t.status == 'completed' }}">{{ t.title }}</span>
+                <span class="task-priority priority-{{ t.priority }}">{{ t.priority }}</span>
+                <button class="task-delete" onclick="deleteTask({{ t.id }})">×</button>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- NOTES -->
+    <div class="tab-content" id="tab-notes">
+        <div class="add-form">
+            <input type="text" id="noteTitle" class="form-input" placeholder="Note title..." onkeydown="if(event.key==='Enter')addNote()">
+            <button class="btn btn-primary btn-sm" onclick="addNote()">Add</button>
+        </div>
+        <div id="noteList">
+            {% for n in notes %}
+            <div class="note-card" onclick="editNote({{ n.id }}, '{{ n.title|e }}', `{{ n.content|e }}`)">
+                <h3>{{ n.title }}</h3>
+                <p>{{ n.content[:200] or 'Empty note — tap to edit' }}</p>
+                <div class="meta">{{ n.updated_at[:10] if n.updated_at else '' }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- HABITS -->
+    <div class="tab-content" id="tab-habits">
+        <div class="add-form">
+            <input type="text" id="habitInput" class="form-input" placeholder="New habit (e.g. Read 30 mins)..." onkeydown="if(event.key==='Enter')addHabit()">
+            <button class="btn btn-primary btn-sm" onclick="addHabit()">Add</button>
+        </div>
+        <div id="habitList">
+            {% for h in habits %}
+            <div class="habit-item">
+                <button class="habit-check {{ 'done' if h.done }}" onclick="checkHabit({{ h.habit.id }})">{{ '✓' if h.done }}</button>
+                <div class="habit-info">
+                    <div class="habit-name">{{ h.habit.name }}</div>
+                    <div class="habit-streak">🔥 {{ h.habit.streak }} day streak (best: {{ h.habit.best_streak }})</div>
+                </div>
+                <button class="task-delete" onclick="deleteHabit({{ h.habit.id }})">×</button>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- GOALS -->
+    <div class="tab-content" id="tab-goals">
+        <div class="add-form">
+            <input type="text" id="goalInput" class="form-input" placeholder="New goal..." onkeydown="if(event.key==='Enter')addGoal()">
+            <button class="btn btn-primary btn-sm" onclick="addGoal()">Add</button>
+        </div>
+        <div id="goalList">
+            {% for g in goals %}
+            <div class="goal-card">
+                <h3>{{ g.title }}</h3>
+                <div class="progress-bar"><div class="progress-fill" style="width:{{ g.progress }}%"></div></div>
+                <div class="progress-text">{{ g.progress }}% complete</div>
+                <div style="margin-top:8px;display:flex;gap:6px;">
+                    <button class="btn btn-sm btn-ghost" onclick="updateGoalProgress({{ g.id }}, Math.min(100, {{ g.progress }}+10))">+10%</button>
+                    <button class="btn btn-sm btn-ghost" onclick="updateGoalProgress({{ g.id }}, 100)">Complete</button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- POMODORO -->
+    <div class="tab-content" id="tab-pomodoro">
+        <div class="card">
+            <div class="pomo-display">
+                <div class="pomo-time" id="pomoTime">25:00</div>
+                <div class="pomo-label" id="pomoLabel">Focus Time</div>
+                <div class="pomo-btns">
+                    <button class="btn btn-primary" id="pomoStartBtn" onclick="togglePomo()">▶ Start</button>
+                    <button class="btn btn-ghost" onclick="resetPomo()">Reset</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI CHAT -->
+    <div class="tab-content" id="tab-ai">
+        <div class="card chat-container">
+            <div class="chat-messages" id="chatMessages">
+                <div class="chat-msg ai">👋 Hey! I'm your AI productivity assistant. Ask me for a summary, task suggestions, motivation, or help with habits and goals!</div>
+            </div>
+            <div class="chat-input-row">
+                <input type="text" id="chatInput" class="form-input" placeholder="Ask me anything..." onkeydown="if(event.key==='Enter')sendChat()">
+                <button class="btn btn-primary btn-sm" onclick="sendChat()">Send</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Note Editor Modal -->
+<div class="modal-overlay" id="noteModal" onclick="if(event.target===this)closeNoteModal()">
+    <div class="modal-box">
+        <h2 id="noteModalTitle">Edit Note</h2>
+        <input type="hidden" id="noteEditId">
+        <div class="form-group" style="margin-bottom:12px;">
+            <input type="text" id="noteEditTitle" class="form-input" placeholder="Title">
+        </div>
+        <div class="form-group" style="margin-bottom:16px;">
+            <textarea id="noteEditContent" class="form-input" rows="8" placeholder="Write your note..."></textarea>
+        </div>
+        <div style="display:flex;gap:8px;">
+            <button class="btn btn-primary" onclick="saveNote()">Save</button>
+            <button class="btn btn-danger btn-sm" onclick="deleteNote()">Delete</button>
+            <button class="btn btn-ghost" onclick="closeNoteModal()">Cancel</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Tab switching
+function switchTab(name) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+    event.target.classList.add('active');
+    document.getElementById('tab-' + name).classList.add('active');
+}
+
+// === TASKS ===
+async function addTask() {
+    const input = document.getElementById('taskInput');
+    const title = input.value.trim(); if (!title) return;
+    const priority = document.getElementById('taskPriority').value;
+    await fetch('/api/tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({title, priority})});
+    input.value = ''; location.reload();
+}
+async function toggleTask(id, status) {
+    await fetch('/api/tasks/'+id, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({status})});
+    location.reload();
+}
+async function deleteTask(id) {
+    await fetch('/api/tasks/'+id, {method:'DELETE'}); location.reload();
+}
+
+// === NOTES ===
+async function addNote() {
+    const input = document.getElementById('noteTitle');
+    const title = input.value.trim(); if (!title) return;
+    await fetch('/api/notes', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({title})});
+    input.value = ''; location.reload();
+}
+function editNote(id, title, content) {
+    document.getElementById('noteEditId').value = id;
+    document.getElementById('noteEditTitle').value = title;
+    document.getElementById('noteEditContent').value = content;
+    document.getElementById('noteModal').classList.add('open');
+}
+function closeNoteModal() { document.getElementById('noteModal').classList.remove('open'); }
+async function saveNote() {
+    const id = document.getElementById('noteEditId').value;
+    const title = document.getElementById('noteEditTitle').value;
+    const content = document.getElementById('noteEditContent').value;
+    await fetch('/api/notes/'+id, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({title, content})});
+    location.reload();
+}
+async function deleteNote() {
+    const id = document.getElementById('noteEditId').value;
+    await fetch('/api/notes/'+id, {method:'DELETE'}); location.reload();
+}
+
+// === HABITS ===
+async function addHabit() {
+    const input = document.getElementById('habitInput');
+    const name = input.value.trim(); if (!name) return;
+    await fetch('/api/habits', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({name})});
+    input.value = ''; location.reload();
+}
+async function checkHabit(id) {
+    await fetch('/api/habits/'+id+'/check', {method:'POST'}); location.reload();
+}
+async function deleteHabit(id) {
+    await fetch('/api/habits/'+id, {method:'DELETE'}); location.reload();
+}
+
+// === GOALS ===
+async function addGoal() {
+    const input = document.getElementById('goalInput');
+    const title = input.value.trim(); if (!title) return;
+    await fetch('/api/goals', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({title})});
+    input.value = ''; location.reload();
+}
+async function updateGoalProgress(id, progress) {
+    const status = progress >= 100 ? 'completed' : 'active';
+    await fetch('/api/goals/'+id, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({progress, status})});
+    location.reload();
+}
+
+// === POMODORO ===
+let pomoRunning = false, pomoSeconds = 25*60, pomoInterval = null;
+function updatePomoDisplay() {
+    const m = Math.floor(pomoSeconds/60), s = pomoSeconds%60;
+    document.getElementById('pomoTime').textContent = String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');
+}
+function togglePomo() {
+    if (pomoRunning) {
+        clearInterval(pomoInterval); pomoRunning = false;
+        document.getElementById('pomoStartBtn').textContent = '▶ Start';
+    } else {
+        if (pomoSeconds <= 0) pomoSeconds = 25*60;
+        fetch('/api/pomodoro/start', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({duration:25})});
+        pomoRunning = true;
+        document.getElementById('pomoStartBtn').textContent = '⏸ Pause';
+        pomoInterval = setInterval(() => {
+            pomoSeconds--;
+            updatePomoDisplay();
+            if (pomoSeconds <= 0) {
+                clearInterval(pomoInterval); pomoRunning = false;
+                document.getElementById('pomoStartBtn').textContent = '▶ Start';
+                document.getElementById('pomoLabel').textContent = '🎉 Done! Take a break.';
+                fetch('/api/pomodoro/complete', {method:'POST'});
+                if (Notification.permission === 'granted') new Notification('🍅 Pomodoro complete!');
+            }
+        }, 1000);
+    }
+}
+function resetPomo() {
+    clearInterval(pomoInterval); pomoRunning = false; pomoSeconds = 25*60;
+    document.getElementById('pomoStartBtn').textContent = '▶ Start';
+    document.getElementById('pomoLabel').textContent = 'Focus Time';
+    updatePomoDisplay();
+}
+
+// === AI CHAT ===
+async function sendChat() {
+    const input = document.getElementById('chatInput');
+    const msg = input.value.trim(); if (!msg) return;
+    input.value = '';
+    const msgs = document.getElementById('chatMessages');
+    msgs.innerHTML += '<div class="chat-msg user">'+msg.replace(/</g,'&lt;')+'</div>';
+    msgs.scrollTop = msgs.scrollHeight;
+    msgs.innerHTML += '<div class="chat-msg ai" id="typing" style="color:var(--text3);">Thinking...</div>';
+    msgs.scrollTop = msgs.scrollHeight;
+    try {
+        const res = await fetch('/api/ai/chat', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:msg})});
+        const data = await res.json();
+        document.getElementById('typing').remove();
+        const reply = (data.reply||'Error').replace(/</g,'&lt;').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>');
+        msgs.innerHTML += '<div class="chat-msg ai">'+reply+'</div>';
+    } catch(e) {
+        document.getElementById('typing').remove();
+        msgs.innerHTML += '<div class="chat-msg ai">Connection error.</div>';
+    }
+    msgs.scrollTop = msgs.scrollHeight;
+}
+
+// Request notification permission
+if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+</script>
+{% endblock %}
