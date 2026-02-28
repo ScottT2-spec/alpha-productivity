@@ -21,11 +21,11 @@ app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 app.permanent_session_lifetime = timedelta(days=30)
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'data', 'productivity.db')
-ADMIN_EMAIL = 'ADMIN EMAIL'
+####
 
-# ============================================
+# 
 # DATABASE
-# ============================================
+# 
 def get_db():
     if 'db' not in g:
         os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -129,9 +129,9 @@ def init_db():
     """)
     db.commit()
 
-# ============================================
+# 
 # AUTH HELPERS
-# ============================================
+# 
 def hash_password(password, salt=None):
     if salt is None:
         salt = secrets.token_hex(16)
@@ -156,9 +156,9 @@ def get_current_user():
 def inject_user():
     return {'user': get_current_user()}
 
-# ============================================
+# 
 # AUTH ROUTES
-# ============================================
+# 
 @app.route('/signup', methods=['GET', 'POST'])
 def signup_page():
     if request.method == 'POST':
@@ -214,9 +214,9 @@ def logout():
     session.clear()
     return redirect(url_for('index'))
 
-# ============================================
+# 
 # MAIN PAGES
-# ============================================
+# 
 @app.route('/')
 def index():
     if 'user_id' in session:
@@ -251,9 +251,9 @@ def dashboard():
         total_tasks=total_tasks, done_tasks=done_tasks,
         pending_tasks=pending_tasks, pomodoros_today=pomodoros_today)
 
-# ============================================
+# 
 # TASKS API
-# ============================================
+# 
 @app.route('/api/tasks', methods=['GET'])
 @login_required
 def api_get_tasks():
@@ -302,9 +302,9 @@ def api_delete_task(task_id):
     db.commit()
     return jsonify({'success': True})
 
-# ============================================
+# 
 # NOTES API
-# ============================================
+# 
 @app.route('/api/notes', methods=['GET'])
 @login_required
 def api_get_notes():
@@ -344,9 +344,9 @@ def api_delete_note(note_id):
     db.commit()
     return jsonify({'success': True})
 
-# ============================================
+#
 # HABITS API
-# ============================================
+# =
 @app.route('/api/habits', methods=['POST'])
 @login_required
 def api_create_habit():
@@ -392,9 +392,9 @@ def api_delete_habit(habit_id):
     db.commit()
     return jsonify({'success': True})
 
-# ============================================
+#
 # GOALS API
-# ============================================
+#
 @app.route('/api/goals', methods=['POST'])
 @login_required
 def api_create_goal():
@@ -418,9 +418,9 @@ def api_update_goal(goal_id):
     db.commit()
     return jsonify({'success': True})
 
-# ============================================
+# 
 # POMODORO API
-# ============================================
+# 
 @app.route('/api/pomodoro/start', methods=['POST'])
 @login_required
 def api_start_pomodoro():
@@ -442,9 +442,9 @@ def api_complete_pomodoro():
         db.commit()
     return jsonify({'success': True})
 
-# ============================================
+# 
 # AI CHAT API
-# ============================================
+# 
 @app.route('/api/ai/chat', methods=['POST'])
 @login_required
 def api_ai_chat():
@@ -555,9 +555,9 @@ def generate_ai_response(message, tasks, habits, goals):
     # Default - helpful response
     return f"👋 I'm your AI productivity assistant! I can help with:\n\n📊 **\"Give me a summary\"** — See your productivity overview\n🎯 **\"What should I focus on?\"** — Get task recommendations\n💪 **\"I need motivation\"** — Get inspired\n🍅 **\"Tell me about Pomodoro\"** — Learn focus techniques\n📅 **\"How are my habits?\"** — Check your streaks\n🎯 **\"Show my goals\"** — Track your progress"
 
-# ============================================
+# 
 # STATS API
-# ============================================
+# 
 @app.route('/api/stats')
 @login_required
 def api_stats():
@@ -583,9 +583,9 @@ def api_stats():
         'weekly': week_data
     })
 
-# ============================================
+#
 # INIT & RUN
-# ============================================
+# 
 with app.app_context():
     init_db()
 
