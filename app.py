@@ -21,7 +21,7 @@ app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 app.permanent_session_lifetime = timedelta(days=30)
 
 DB_PATH = os.path.join(os.path.dirname(__file__), 'data', 'productivity.db')
-####
+ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'scottantwi930@gmail.com')
 
 # 
 # DATABASE

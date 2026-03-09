@@ -134,7 +134,7 @@
         </div>
         <div id="noteList">
             {% for n in notes %}
-            <div class="note-card" onclick="editNote({{ n.id }}, '{{ n.title|e }}', `{{ n.content|e }}`)">
+            <div class="note-card" onclick="editNote({{ n.id }}, '{{ n.title|e }}', '{{ n.content|e|replace("\n", "\\n")|replace("'", "\\'") }}')">
                 <h3>{{ n.title }}</h3>
                 <p>{{ n.content[:200] or 'Empty note — tap to edit' }}</p>
                 <div class="meta">{{ n.updated_at[:10] if n.updated_at else '' }}</div>
