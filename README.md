@@ -65,4 +65,4 @@ alpha-productivity/
 
 ---
 
-Built by [Scott Antwi](https://github.com/ScottT2-spec)
+
