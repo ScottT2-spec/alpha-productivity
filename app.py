@@ -1,6 +1,6 @@
 """
 Alpha Productivity — AI-Powered Productivity Web App
-Built by Scott Antwi (@ScottT2-spec)
+alpha productivity app
 
 A dynamic web-based assistant that helps users manage tasks, stay organized,
 and boost productivity with AI-powered suggestions and summaries.
