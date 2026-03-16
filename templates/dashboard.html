@@ -113,16 +113,16 @@
     </div>
 
     <div class="tabs">
-        <button class="tab active" onclick="switchTab('tasks')">📋 Tasks</button>
+        <button class="tab active" onclick="switchTab('ai')">🧠 AI Chat</button>
+        <button class="tab" onclick="switchTab('tasks')">📋 Tasks</button>
         <button class="tab" onclick="switchTab('notes')">📝 Notes</button>
         <button class="tab" onclick="switchTab('habits')">🔥 Habits</button>
         <button class="tab" onclick="switchTab('goals')">🎯 Goals</button>
         <button class="tab" onclick="switchTab('pomodoro')">🍅 Pomodoro</button>
-        <button class="tab" onclick="switchTab('ai')">🧠 AI Chat</button>
     </div>
 
     <!-- TASKS -->
-    <div class="tab-content active" id="tab-tasks">
+    <div class="tab-content" id="tab-tasks">
         <div class="add-form">
             <input type="text" id="taskInput" class="form-input" placeholder="Add a new task..." onkeydown="if(event.key==='Enter')addTask()">
             <select id="taskPriority" class="form-input" style="width:auto;">
@@ -217,7 +217,7 @@
     </div>
 
     <!-- AI CHAT -->
-    <div class="tab-content" id="tab-ai">
+    <div class="tab-content active" id="tab-ai">
         <div class="card chat-container">
             <div class="chat-messages" id="chatMessages">
                 <div class="chat-msg ai">👋 Hey! I'm your AI productivity assistant. Ask me for a summary, task suggestions, motivation, or help with habits and goals!</div>
