@@ -8,7 +8,6 @@ and boost productivity with AI-powered suggestions and summaries.
 
 import os
 import json
-import sqlite3
 import hashlib
 import secrets
 from datetime import datetime, timedelta
@@ -20,7 +19,12 @@ app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 app.permanent_session_lifetime = timedelta(days=30)
 
-# Use /tmp/ on serverless (Vercel), local data/ otherwise
+# Database: Turso (cloud SQLite) if configured, else local SQLite fallback
+TURSO_URL = os.environ.get('TURSO_DATABASE_URL', '')
+TURSO_TOKEN = os.environ.get('TURSO_AUTH_TOKEN', '')
+USE_TURSO = bool(TURSO_URL and TURSO_TOKEN)
+
+# Local SQLite fallback path
 _data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
 if not os.path.isdir(_data_dir):
     try:
@@ -30,23 +34,46 @@ if not os.path.isdir(_data_dir):
 DB_PATH = os.path.join(_data_dir, 'productivity.db')
 ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'scottantwi930@gmail.com')
 
-# 
-# DATABASE
-# 
+#
+# DATABASE — Turso (cloud) or SQLite (local)
+#
 def get_db():
     if 'db' not in g:
-        os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-        g.db = sqlite3.connect(DB_PATH)
-        g.db.row_factory = sqlite3.Row
-        g.db.execute("PRAGMA journal_mode=WAL")
-        g.db.execute("PRAGMA foreign_keys=ON")
+        if USE_TURSO:
+            import libsql_experimental as libsql
+            g.db = libsql.connect(TURSO_URL, auth_token=TURSO_TOKEN)
+            g.db.row_factory = _dict_row_factory
+        else:
+            import sqlite3
+            os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+            g.db = sqlite3.connect(DB_PATH)
+            g.db.row_factory = sqlite3.Row
+            g.db.execute("PRAGMA journal_mode=WAL")
+            g.db.execute("PRAGMA foreign_keys=ON")
     return g.db
+
+def _dict_row_factory(cursor, row):
+    """Make Turso rows behave like sqlite3.Row (dict-like access)."""
+    if hasattr(cursor, 'description') and cursor.description:
+        cols = [d[0] for d in cursor.description]
+        return _DictRow(dict(zip(cols, row)))
+    return row
+
+class _DictRow(dict):
+    """Dict that also supports index access and .keys() like sqlite3.Row."""
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return list(self.values())[key]
+        return super().__getitem__(key)
 
 @app.teardown_appcontext
 def close_db(exc):
     db = g.pop('db', None)
     if db:
-        db.close()
+        try:
+            db.close()
+        except Exception:
+            pass
 
 def init_db():
     db = get_db()
