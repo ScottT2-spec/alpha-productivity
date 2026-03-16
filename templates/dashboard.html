@@ -87,6 +87,24 @@
         <p>{{ pending_tasks }} task{{ 's' if pending_tasks != 1 }} pending · {{ done_tasks }} completed · {{ pomodoros_today }} pomodoro{{ 's' if pomodoros_today != 1 }} today</p>
     </div>
 
+    <!-- PRODUCTIVITY SCORE -->
+    <div id="scoreCard" class="card" style="text-align:center;padding:20px;margin-bottom:20px;display:none;">
+        <div style="display:flex;align-items:center;justify-content:center;gap:20px;flex-wrap:wrap;">
+            <div>
+                <div id="scoreNum" style="font-size:3rem;font-weight:800;background:var(--grad);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">0</div>
+                <div id="scoreLevel" style="font-size:0.85rem;font-weight:600;color:var(--text2);">Loading...</div>
+            </div>
+            <div style="text-align:left;font-size:0.78rem;color:var(--text3);min-width:150px;">
+                <div>📋 Tasks: <span id="scoreTasks" style="color:var(--text);">-</span></div>
+                <div>🍅 Pomodoros: <span id="scorePomos" style="color:var(--text);">-</span></div>
+                <div>🔥 Habits: <span id="scoreHabits" style="color:var(--text);">-</span></div>
+                <div>🎯 Goals: <span id="scoreGoals" style="color:var(--text);">-</span></div>
+            </div>
+        </div>
+        <button class="btn btn-sm btn-ghost" style="margin-top:12px;" onclick="generateDailyPlan()">📅 Generate Daily Plan</button>
+        <div id="dailyPlan" style="display:none;text-align:left;margin-top:16px;padding:16px;background:var(--bg);border-radius:10px;font-size:0.88rem;line-height:1.7;"></div>
+    </div>
+
     <div class="stats-row">
         <div class="stat-card"><div class="num">{{ pending_tasks }}</div><div class="label">Pending</div></div>
         <div class="stat-card"><div class="num">{{ done_tasks }}</div><div class="label">Completed</div></div>
@@ -367,6 +385,51 @@ async function sendChat() {
         msgs.innerHTML += '<div class="chat-msg ai">Connection error.</div>';
     }
     msgs.scrollTop = msgs.scrollHeight;
+}
+
+// === PRODUCTIVITY SCORE ===
+async function loadScore() {
+    try {
+        const res = await fetch('/api/productivity-score');
+        const data = await res.json();
+        document.getElementById('scoreCard').style.display = 'block';
+        document.getElementById('scoreNum').textContent = data.score;
+        document.getElementById('scoreNum').style.background = data.color;
+        document.getElementById('scoreNum').style['-webkit-background-clip'] = 'text';
+        document.getElementById('scoreNum').style['-webkit-text-fill-color'] = 'transparent';
+        document.getElementById('scoreLevel').textContent = data.level;
+        document.getElementById('scoreTasks').textContent = data.breakdown.tasks + '/40';
+        document.getElementById('scorePomos').textContent = data.breakdown.pomodoros + '/15';
+        document.getElementById('scoreHabits').textContent = data.breakdown.habits + '/30';
+        document.getElementById('scoreGoals').textContent = data.breakdown.goals + '/15';
+    } catch(e) {}
+}
+loadScore();
+
+// === DAILY PLAN ===
+async function generateDailyPlan() {
+    const planDiv = document.getElementById('dailyPlan');
+    planDiv.style.display = 'block';
+    planDiv.innerHTML = '<div style="color:var(--text3);text-align:center;">🧠 AI is planning your day...</div>';
+    try {
+        const res = await fetch('/api/ai/daily-plan', {method:'POST', headers:{'Content-Type':'application/json'}, body:'{}'});
+        const data = await res.json();
+        planDiv.innerHTML = (data.plan || 'Could not generate plan.').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>');
+    } catch(e) {
+        planDiv.innerHTML = 'Could not generate plan. Try again.';
+    }
+}
+
+// === TASK BREAKDOWN ===
+async function breakTask(title) {
+    const res = await fetch('/api/ai/break-task', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({title})});
+    const data = await res.json();
+    if (data.subtasks) {
+        for (const sub of data.subtasks) {
+            await fetch('/api/tasks', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({title: sub, priority:'medium'})});
+        }
+        location.reload();
+    }
 }
 
 // Request notification permission

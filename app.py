@@ -573,9 +573,81 @@ def api_complete_pomodoro():
         db.commit()
     return jsonify({'success': True})
 
-# 
-# AI CHAT API
-# 
+#
+# AI — Real Groq-powered AI with fallback
+#
+_GROQ_KEYS = [v for k, v in sorted(os.environ.items()) if k.startswith('GROQ_KEY_') and v]
+_groq_key = os.environ.get('GROQ_API_KEY', '')
+if _groq_key and _groq_key not in _GROQ_KEYS:
+    _GROQ_KEYS.insert(0, _groq_key)
+_groq_idx = 0
+
+def call_groq(messages, max_tokens=800):
+    """Call Groq API with key rotation. Returns AI text or None on failure."""
+    global _groq_idx
+    if not _GROQ_KEYS:
+        return None
+    for attempt in range(min(3, len(_GROQ_KEYS))):
+        key = _GROQ_KEYS[_groq_idx % len(_GROQ_KEYS)]
+        _groq_idx += 1
+        try:
+            payload = json.dumps({
+                'model': 'llama-3.3-70b-versatile',
+                'messages': messages,
+                'max_tokens': max_tokens,
+                'temperature': 0.7
+            }).encode('utf-8')
+            req = urllib.request.Request('https://api.groq.com/openai/v1/chat/completions',
+                                        data=payload, method='POST')
+            req.add_header('Authorization', f'Bearer {key}')
+            req.add_header('Content-Type', 'application/json')
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read())
+                return data['choices'][0]['message']['content']
+        except Exception as e:
+            print(f'Groq attempt {attempt+1} failed: {e}')
+            continue
+    return None
+
+
+def _build_user_context(db, uid):
+    """Build a context string from user's data for AI."""
+    tasks = db.execute('SELECT title, status, priority, due_date FROM tasks WHERE user_id=? ORDER BY created_at DESC LIMIT 20', (uid,)).fetchall()
+    habits = db.execute('SELECT name, streak, best_streak FROM habits WHERE user_id=?', (uid,)).fetchall()
+    goals = db.execute('SELECT title, progress, status FROM goals WHERE user_id=? AND status="active"', (uid,)).fetchall()
+    pomos = db.execute('SELECT COUNT(*) as c FROM pomodoro_sessions WHERE user_id=? AND completed=1', (uid,)).fetchone()['c']
+    notes = db.execute('SELECT title FROM notes WHERE user_id=? ORDER BY updated_at DESC LIMIT 5', (uid,)).fetchall()
+
+    task_list = [dict(t) for t in tasks]
+    habit_list = [dict(h) for h in habits]
+    goal_list = [dict(g) for g in goals]
+
+    pending = [t for t in task_list if t['status'] != 'completed']
+    completed = [t for t in task_list if t['status'] == 'completed']
+    high_priority = [t for t in pending if t['priority'] == 'high']
+
+    ctx = f"USER DATA (real-time from their account):\n"
+    ctx += f"Tasks: {len(completed)} completed, {len(pending)} pending\n"
+    if pending:
+        ctx += f"Pending tasks: {', '.join(t['title'] + ' [' + t['priority'] + ']' for t in pending[:10])}\n"
+    if high_priority:
+        ctx += f"HIGH PRIORITY: {', '.join(t['title'] for t in high_priority)}\n"
+    if completed:
+        ctx += f"Recently completed: {', '.join(t['title'] for t in completed[:5])}\n"
+    if habit_list:
+        ctx += f"Habits: {', '.join(h['name'] + ' (' + str(h['streak']) + ' day streak)' for h in habit_list)}\n"
+    if goal_list:
+        ctx += f"Active goals: {', '.join(g['title'] + ' (' + str(g['progress']) + '%)' for g in goal_list)}\n"
+    ctx += f"Total pomodoros completed: {pomos}\n"
+    if notes:
+        ctx += f"Recent notes: {', '.join(dict(n)['title'] for n in notes)}\n"
+
+    return ctx, task_list, habit_list, goal_list, pending, completed, high_priority
+
+
+#
+# AI CHAT API — Real AI with smart fallback
+#
 @app.route('/api/ai/chat', methods=['POST'])
 @login_required
 def api_ai_chat():
@@ -586,105 +658,279 @@ def api_ai_chat():
 
     db = get_db()
     uid = session['user_id']
+    user = db.execute('SELECT full_name, username FROM users WHERE id=?', (uid,)).fetchone()
+    name = (dict(user).get('full_name') or dict(user).get('username') or 'there').split()[0]
 
     # Save user message
     db.execute('INSERT INTO ai_chats (user_id, role, content) VALUES (?,?,?)', (uid, 'user', message))
 
-    # Get context: user's tasks, habits, goals
-    tasks = db.execute('SELECT title, status, priority, due_date FROM tasks WHERE user_id=? ORDER BY created_at DESC LIMIT 20', (uid,)).fetchall()
-    habits = db.execute('SELECT name, streak FROM habits WHERE user_id=?', (uid,)).fetchall()
-    goals = db.execute('SELECT title, progress, status FROM goals WHERE user_id=? AND status="active"', (uid,)).fetchall()
+    # Build context
+    ctx, task_list, habit_list, goal_list, pending, completed, high_priority = _build_user_context(db, uid)
 
-    # Build AI response based on context
-    response = generate_ai_response(message, tasks, habits, goals)
+    # Try real AI first
+    system_prompt = f"""You are Alpha ⚡ — an AI productivity coach inside Alpha Productivity app. You're sharp, warm, and genuinely helpful.
+
+{ctx}
+
+YOUR ROLE:
+- Analyze their actual tasks, habits, goals, and patterns
+- Give specific, actionable advice based on THEIR data (not generic tips)
+- Reference their actual task names, habit streaks, and goal progress
+- Be encouraging but honest — if they're falling behind, say so kindly
+- Keep responses concise (2-4 paragraphs max) — this is a chat, not an essay
+- Use markdown for formatting (**bold**, bullet points)
+- Use emojis naturally (2-3 per message)
+- Address them as {name}
+
+CAPABILITIES:
+- Productivity analysis and task prioritization
+- Breaking down big tasks into smaller steps
+- Habit coaching and streak motivation
+- Goal setting strategy
+- Time management tips (Pomodoro, time blocking, etc.)
+- Motivation when they're stuck
+- Daily planning suggestions
+- Anything productivity/self-improvement related"""
+
+    # Get recent chat history for context
+    recent = db.execute('SELECT role, content FROM ai_chats WHERE user_id=? ORDER BY created_at DESC LIMIT 10', (uid,)).fetchall()
+    recent = [dict(r) for r in recent][::-1]  # Reverse to chronological
+
+    messages = [{'role': 'system', 'content': system_prompt}]
+    for r in recent[:-1]:  # Exclude current message (already in recent)
+        messages.append({'role': r['role'], 'content': r['content']})
+    messages.append({'role': 'user', 'content': message})
+
+    ai_reply = call_groq(messages)
+
+    if ai_reply:
+        response = ai_reply
+    else:
+        # Smart fallback — keyword-based responses
+        response = _fallback_response(message, name, pending, completed, high_priority, habit_list, goal_list)
 
     db.execute('INSERT INTO ai_chats (user_id, role, content) VALUES (?,?,?)', (uid, 'assistant', response))
     db.commit()
 
     return jsonify({'reply': response})
 
-def generate_ai_response(message, tasks, habits, goals):
-    """Generate contextual AI response based on user data and message."""
+
+#
+# AI DAILY PLANNER — generates a personalized daily plan
+#
+@app.route('/api/ai/daily-plan', methods=['POST'])
+@login_required
+def api_daily_plan():
+    db = get_db()
+    uid = session['user_id']
+    user = db.execute('SELECT full_name, username FROM users WHERE id=?', (uid,)).fetchone()
+    name = (dict(user).get('full_name') or dict(user).get('username') or 'there').split()[0]
+
+    ctx, task_list, habit_list, goal_list, pending, completed, high_priority = _build_user_context(db, uid)
+
+    prompt = f"""Generate a personalized daily plan for {name} based on their current tasks and habits.
+
+{ctx}
+
+Create a realistic daily schedule with time blocks. Format:
+
+**🌅 Your Daily Plan for Today**
+
+For each time block:
+⏰ [Time] — [Activity] (why: [brief reason based on their data])
+
+Rules:
+- Prioritize their HIGH PRIORITY tasks first in prime focus hours (9-12)
+- Include habit check-ins at appropriate times
+- Add short breaks between focus blocks
+- Include goal-related work if they have active goals
+- Be realistic — don't overschedule
+- If they have few tasks, suggest productive activities
+- End with an encouraging note
+- Keep it to 6-8 time blocks max"""
+
+    ai_reply = call_groq([
+        {'role': 'system', 'content': 'You are Alpha ⚡, an AI productivity coach. Generate concise, actionable daily plans based on real user data. Use markdown and emojis.'},
+        {'role': 'user', 'content': prompt}
+    ], max_tokens=600)
+
+    if ai_reply:
+        return jsonify({'plan': ai_reply})
+
+    # Fallback
+    plan_lines = ["**🌅 Your Daily Plan**\n"]
+    if high_priority:
+        plan_lines.append(f"⏰ **9:00 AM** — Tackle: {high_priority[0]['title']} (high priority!)")
+    if pending:
+        for t in pending[:3]:
+            if t not in high_priority:
+                plan_lines.append(f"⏰ **Focus block** — Work on: {t['title']}")
+    if habit_list:
+        plan_lines.append(f"⏰ **Midday** — Check habits: {', '.join(h['name'] for h in habit_list[:3])}")
+    plan_lines.append(f"\n💪 You've got this!")
+    return jsonify({'plan': '\n'.join(plan_lines)})
+
+
+#
+# AI TASK BREAKDOWN — splits a task into subtasks
+#
+@app.route('/api/ai/break-task', methods=['POST'])
+@login_required
+def api_break_task():
+    data = request.json or {}
+    task_title = data.get('title', '').strip()
+    if not task_title:
+        return jsonify({'error': 'Task title required'}), 400
+
+    ai_reply = call_groq([
+        {'role': 'system', 'content': 'You are a productivity assistant. Break down tasks into 4-6 clear, actionable subtasks. Return ONLY a JSON array of strings like ["Step 1", "Step 2"]. No markdown, no explanation.'},
+        {'role': 'user', 'content': f'Break this task into subtasks: {task_title}'}
+    ], max_tokens=300)
+
+    if ai_reply:
+        try:
+            # Try to parse JSON
+            clean = ai_reply.strip()
+            if clean.startswith('```'):
+                clean = clean.split('\n', 1)[1] if '\n' in clean else clean[3:]
+            if clean.endswith('```'):
+                clean = clean[:-3]
+            subtasks = json.loads(clean.strip())
+            if isinstance(subtasks, list):
+                return jsonify({'subtasks': subtasks})
+        except Exception:
+            pass
+    
+    # Fallback
+    return jsonify({'subtasks': [
+        f"Research what's needed for: {task_title}",
+        f"Gather materials/resources",
+        f"Work on first draft/attempt",
+        f"Review and refine",
+        f"Finalize and mark complete"
+    ]})
+
+
+#
+# PRODUCTIVITY SCORE API
+#
+@app.route('/api/productivity-score')
+@login_required
+def api_productivity_score():
+    db = get_db()
+    uid = session['user_id']
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+
+    # Calculate a productivity score (0-100)
+    tasks_total = db.execute('SELECT COUNT(*) as c FROM tasks WHERE user_id=?', (uid,)).fetchone()['c']
+    tasks_done = db.execute('SELECT COUNT(*) as c FROM tasks WHERE user_id=? AND status="completed"', (uid,)).fetchone()['c']
+    tasks_today = db.execute('SELECT COUNT(*) as c FROM tasks WHERE user_id=? AND status="completed" AND date(completed_at)=?', (uid, today)).fetchone()['c']
+    pomos_today = db.execute('SELECT COUNT(*) as c FROM pomodoro_sessions WHERE user_id=? AND completed=1 AND date(started_at)=?', (uid, today)).fetchone()['c']
+    habits = db.execute('SELECT streak FROM habits WHERE user_id=?', (uid,)).fetchall()
+    habits_checked = db.execute(
+        'SELECT COUNT(*) as c FROM habit_logs hl JOIN habits h ON hl.habit_id=h.id WHERE h.user_id=? AND hl.date=?',
+        (uid, today)).fetchone()['c']
+    total_habits = len(habits)
+    goals = db.execute('SELECT progress FROM goals WHERE user_id=? AND status="active"', (uid,)).fetchall()
+
+    # Score components
+    task_score = 0
+    if tasks_total > 0:
+        task_score = min(30, int((tasks_done / tasks_total) * 30))
+    task_score += min(10, tasks_today * 5)  # bonus for today
+
+    pomo_score = min(15, pomos_today * 5)
+
+    habit_score = 0
+    if total_habits > 0:
+        habit_score = min(20, int((habits_checked / total_habits) * 20))
+    avg_streak = sum(dict(h).get('streak', 0) for h in habits) / max(1, total_habits)
+    habit_score += min(10, int(avg_streak))
+
+    goal_score = 0
+    if goals:
+        avg_progress = sum(dict(g).get('progress', 0) for g in goals) / len(goals)
+        goal_score = min(15, int(avg_progress / 100 * 15))
+
+    total_score = min(100, task_score + pomo_score + habit_score + goal_score)
+
+    # Determine level
+    if total_score >= 80:
+        level = '🔥 On Fire'
+        color = '#10b981'
+    elif total_score >= 60:
+        level = '⚡ Productive'
+        color = '#6c5ce7'
+    elif total_score >= 40:
+        level = '📈 Building Momentum'
+        color = '#f59e0b'
+    elif total_score >= 20:
+        level = '🌱 Getting Started'
+        color = '#3b82f6'
+    else:
+        level = '😴 Warming Up'
+        color = '#6b7280'
+
+    return jsonify({
+        'score': total_score,
+        'level': level,
+        'color': color,
+        'breakdown': {
+            'tasks': task_score,
+            'pomodoros': pomo_score,
+            'habits': habit_score,
+            'goals': goal_score
+        },
+        'today': {
+            'tasks_completed': tasks_today,
+            'pomodoros': pomos_today,
+            'habits_checked': habits_checked,
+            'total_habits': total_habits
+        }
+    })
+
+
+def _fallback_response(message, name, pending, completed, high_priority, habit_list, goal_list):
+    """Smart keyword-based fallback when AI is unavailable."""
+    import random
     msg_lower = message.lower()
 
-    task_list = [dict(t) for t in tasks]
-    habit_list = [dict(h) for h in habits]
-    goal_list = [dict(g) for g in goals]
-
-    pending = [t for t in task_list if t['status'] != 'completed']
-    completed = [t for t in task_list if t['status'] == 'completed']
-    high_priority = [t for t in pending if t['priority'] == 'high']
-
-    # Task summary
     if any(w in msg_lower for w in ['summary', 'overview', 'how am i doing', 'status', 'report']):
-        lines = [f"📊 **Your Productivity Summary**\n"]
+        lines = [f"📊 **Your Productivity Summary, {name}**\n"]
         lines.append(f"📋 Tasks: {len(completed)} done / {len(pending)} pending")
         if high_priority:
             lines.append(f"🔴 High priority: {', '.join(t['title'] for t in high_priority)}")
         if habit_list:
-            best_habit = max(habit_list, key=lambda h: h['streak'])
-            lines.append(f"🔥 Best streak: {best_habit['name']} ({best_habit['streak']} days)")
+            best = max(habit_list, key=lambda h: h['streak'])
+            lines.append(f"🔥 Best streak: {best['name']} ({best['streak']} days)")
         if goal_list:
             lines.append(f"🎯 Active goals: {len(goal_list)}")
-            for g in goal_list:
-                lines.append(f"  • {g['title']} — {g['progress']}%")
-        if not pending:
-            lines.append("\n✨ All tasks done! Great work!")
         return "\n".join(lines)
 
-    # Suggest what to work on
     if any(w in msg_lower for w in ['what should i', 'suggest', 'recommend', 'focus', 'what next', 'priority']):
         if high_priority:
-            return f"🎯 Focus on your high-priority task: **{high_priority[0]['title']}**\n\nYou have {len(high_priority)} urgent task(s). Tackle those first, then move to medium priority."
+            return f"🎯 {name}, focus on **{high_priority[0]['title']}** — it's high priority. Knock it out first, then you'll feel unstoppable."
         elif pending:
-            return f"📋 Next up: **{pending[0]['title']}**\n\nYou have {len(pending)} pending tasks. Try the Pomodoro timer to stay focused — 25 min on, 5 min break."
-        else:
-            return "🎉 You've completed all your tasks! Time to set new goals or review your habits."
+            return f"📋 Next up: **{pending[0]['title']}**. Start a 25-min Pomodoro and just go."
+        return f"🎉 All clear, {name}! Set a new goal or add some tasks."
 
-    # Motivation
-    if any(w in msg_lower for w in ['motivat', 'tired', 'lazy', 'procrastinat', 'can\'t focus', 'struggling']):
+    if any(w in msg_lower for w in ['motivat', 'tired', 'lazy', 'procrastinat', 'struggling', 'can\'t focus']):
         quotes = [
             "💪 \"The secret of getting ahead is getting started.\" — Mark Twain",
             "🔥 \"It does not matter how slowly you go as long as you do not stop.\" — Confucius",
             "⭐ \"You don't have to be great to start, but you have to start to be great.\" — Zig Ziglar",
-            "🎯 \"Focus on being productive instead of busy.\" — Tim Ferriss",
             "🚀 \"Small daily improvements over time lead to stunning results.\" — Robin Sharma"
         ]
-        import random
-        quote = random.choice(quotes)
-        tip = ""
-        if pending:
-            tip = f"\n\nStart small — try working on **{pending[0]['title']}** for just 10 minutes. Once you start, momentum will carry you."
-        return f"{quote}{tip}"
+        tip = f"\n\nStart with just 10 minutes on **{pending[0]['title']}**." if pending else ""
+        return f"{random.choice(quotes)}{tip}"
 
-    # Pomodoro help
-    if any(w in msg_lower for w in ['pomodoro', 'timer', 'focus time']):
-        return "🍅 **Pomodoro Technique:**\n1. Pick a task\n2. Set timer for 25 minutes\n3. Work with zero distractions\n4. Take a 5-min break\n5. After 4 rounds, take a 15-min break\n\nUse the Pomodoro timer on your dashboard!"
+    if any(w in msg_lower for w in ['plan', 'schedule', 'today', 'morning']):
+        return f"📅 {name}, try asking me to **generate your daily plan** — I'll create a time-blocked schedule based on your tasks!"
 
-    # Habits
-    if any(w in msg_lower for w in ['habit', 'streak', 'routine', 'daily']):
-        if habit_list:
-            lines = ["📅 **Your Habits:**"]
-            for h in habit_list:
-                emoji = "🔥" if h['streak'] >= 7 else "✅" if h['streak'] >= 3 else "🌱"
-                lines.append(f"  {emoji} {h['name']} — {h['streak']} day streak")
-            lines.append("\nKeep going! Consistency beats intensity.")
-            return "\n".join(lines)
-        return "🌱 You haven't set up any habits yet! Go to Habits and add your first one. Start with something small and build up."
+    if any(w in msg_lower for w in ['break', 'split', 'subtask', 'smaller']):
+        return f"🔨 Want me to break a task into subtasks? Tell me which task and I'll split it up!"
 
-    # Goals
-    if any(w in msg_lower for w in ['goal', 'target', 'aim', 'objective']):
-        if goal_list:
-            lines = ["🎯 **Your Active Goals:**"]
-            for g in goal_list:
-                bar_fill = int(g['progress'] / 10)
-                bar = "█" * bar_fill + "░" * (10 - bar_fill)
-                lines.append(f"  {g['title']} [{bar}] {g['progress']}%")
-            return "\n".join(lines)
-        return "🎯 Set your first goal! Having clear goals makes you 42% more likely to achieve them."
-
-    # Default - helpful response
-    return f"👋 I'm your AI productivity assistant! I can help with:\n\n📊 **\"Give me a summary\"** — See your productivity overview\n🎯 **\"What should I focus on?\"** — Get task recommendations\n💪 **\"I need motivation\"** — Get inspired\n🍅 **\"Tell me about Pomodoro\"** — Learn focus techniques\n📅 **\"How are my habits?\"** — Check your streaks\n🎯 **\"Show my goals\"** — Track your progress"
+    return f"👋 Hey {name}! I'm your AI productivity coach. Try:\n\n📊 **\"How am I doing?\"** — Productivity summary\n🎯 **\"What should I focus on?\"** — Smart priorities\n📅 **\"Plan my day\"** — AI daily planner\n💪 **\"I need motivation\"** — Get fired up\n🔨 **\"Break down [task]\"** — Split into subtasks"
 
 # 
 # STATS API
