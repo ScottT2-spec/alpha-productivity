@@ -10,6 +10,8 @@ import os
 import json
 import hashlib
 import secrets
+import urllib.request
+import urllib.parse
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import (Flask, render_template, request, redirect, url_for,
@@ -19,10 +21,15 @@ app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
 app.permanent_session_lifetime = timedelta(days=30)
 
-# Database: Turso (cloud SQLite) if configured, else local SQLite fallback
+# Database: Turso (cloud SQLite via HTTP) if configured, else local SQLite fallback
 TURSO_URL = os.environ.get('TURSO_DATABASE_URL', '')
 TURSO_TOKEN = os.environ.get('TURSO_AUTH_TOKEN', '')
 USE_TURSO = bool(TURSO_URL and TURSO_TOKEN)
+
+# Convert libsql:// URL to HTTPS for HTTP API
+_turso_http_url = ''
+if TURSO_URL:
+    _turso_http_url = TURSO_URL.replace('libsql://', 'https://').rstrip('/')
 
 # Local SQLite fallback path
 _data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
@@ -34,15 +41,119 @@ if not os.path.isdir(_data_dir):
 DB_PATH = os.path.join(_data_dir, 'productivity.db')
 ADMIN_EMAIL = os.environ.get('ADMIN_EMAIL', 'scottantwi930@gmail.com')
 
+
+#
+# TURSO HTTP CLIENT — pure Python, no native dependencies
+#
+class _DictRow(dict):
+    """Dict that supports both key and index access like sqlite3.Row."""
+    def __getitem__(self, key):
+        if isinstance(key, int):
+            return list(self.values())[key]
+        return super().__getitem__(key)
+    def keys(self):
+        return list(super().keys())
+
+
+class TursoDB:
+    """Lightweight Turso HTTP API client that mimics sqlite3 connection interface."""
+
+    def __init__(self, url, token):
+        self.url = url + '/v2/pipeline'
+        self.token = token
+        self._last_description = None
+
+    def _request(self, statements):
+        """Send a pipeline request to Turso."""
+        body = {"requests": []}
+        for stmt in statements:
+            if isinstance(stmt, str):
+                body["requests"].append({"type": "execute", "stmt": {"sql": stmt}})
+            else:
+                sql, params = stmt
+                args = []
+                for p in params:
+                    if p is None:
+                        args.append({"type": "null"})
+                    elif isinstance(p, int):
+                        args.append({"type": "integer", "value": str(p)})
+                    elif isinstance(p, float):
+                        args.append({"type": "float", "value": p})
+                    else:
+                        args.append({"type": "text", "value": str(p)})
+                body["requests"].append({"type": "execute", "stmt": {"sql": sql, "args": args}})
+        body["requests"].append({"type": "close"})
+
+        data = json.dumps(body).encode('utf-8')
+        req = urllib.request.Request(self.url, data=data, method='POST')
+        req.add_header('Authorization', f'Bearer {self.token}')
+        req.add_header('Content-Type', 'application/json')
+
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read())
+
+    def execute(self, sql, params=None):
+        """Execute a single SQL statement."""
+        if params:
+            result = self._request([(sql, tuple(params))])
+        else:
+            result = self._request([sql])
+        return _TursoResult(result['results'][0] if result.get('results') else {})
+
+    def executescript(self, script):
+        """Execute multiple SQL statements separated by semicolons."""
+        statements = [s.strip() for s in script.split(';') if s.strip()]
+        if statements:
+            self._request(statements)
+
+    def commit(self):
+        pass  # Turso auto-commits
+
+    def close(self):
+        pass
+
+
+class _TursoResult:
+    """Wraps Turso HTTP response to mimic sqlite3 cursor."""
+
+    def __init__(self, result):
+        self._result = result
+        resp = result.get('response', {}).get('result', {})
+        self._cols = [c.get('name', '') for c in resp.get('cols', [])]
+        self._rows = resp.get('rows', [])
+        self.lastrowid = resp.get('last_insert_rowid')
+        self.rowcount = resp.get('affected_row_count', 0)
+        self.description = [(c, None, None, None, None, None, None) for c in self._cols] if self._cols else None
+
+    def _make_row(self, row):
+        values = [cell.get('value') for cell in row]
+        # Convert types
+        typed = []
+        for v in values:
+            if v is None:
+                typed.append(None)
+            elif isinstance(v, str) and v.isdigit():
+                typed.append(int(v))
+            else:
+                typed.append(v)
+        return _DictRow(zip(self._cols, typed))
+
+    def fetchone(self):
+        if not self._rows:
+            return None
+        return self._make_row(self._rows[0])
+
+    def fetchall(self):
+        return [self._make_row(r) for r in self._rows]
+
+
 #
 # DATABASE — Turso (cloud) or SQLite (local)
 #
 def get_db():
     if 'db' not in g:
         if USE_TURSO:
-            import libsql_experimental as libsql
-            g.db = libsql.connect(TURSO_URL, auth_token=TURSO_TOKEN)
-            g.db.row_factory = _dict_row_factory
+            g.db = TursoDB(_turso_http_url, TURSO_TOKEN)
         else:
             import sqlite3
             os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
@@ -51,20 +162,6 @@ def get_db():
             g.db.execute("PRAGMA journal_mode=WAL")
             g.db.execute("PRAGMA foreign_keys=ON")
     return g.db
-
-def _dict_row_factory(cursor, row):
-    """Make Turso rows behave like sqlite3.Row (dict-like access)."""
-    if hasattr(cursor, 'description') and cursor.description:
-        cols = [d[0] for d in cursor.description]
-        return _DictRow(dict(zip(cols, row)))
-    return row
-
-class _DictRow(dict):
-    """Dict that also supports index access and .keys() like sqlite3.Row."""
-    def __getitem__(self, key):
-        if isinstance(key, int):
-            return list(self.values())[key]
-        return super().__getitem__(key)
 
 @app.teardown_appcontext
 def close_db(exc):
