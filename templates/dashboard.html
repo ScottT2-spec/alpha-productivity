@@ -134,7 +134,7 @@
         </div>
         <div id="noteList">
             {% for n in notes %}
-            <div class="note-card" onclick="editNote({{ n.id }}, '{{ n.title|e }}', '{{ n.content|e|replace("\n", "\\n")|replace("'", "\\'") }}')">
+            <div class="note-card" onclick="editNote(this)" data-id="{{ n.id }}" data-title="{{ n.title|e }}" data-content="{{ n.content|e }}">
                 <h3>{{ n.title }}</h3>
                 <p>{{ n.content[:200] or 'Empty note — tap to edit' }}</p>
                 <div class="meta">{{ n.updated_at[:10] if n.updated_at else '' }}</div>
@@ -265,10 +265,10 @@ async function addNote() {
     await fetch('/api/notes', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({title})});
     input.value = ''; location.reload();
 }
-function editNote(id, title, content) {
-    document.getElementById('noteEditId').value = id;
-    document.getElementById('noteEditTitle').value = title;
-    document.getElementById('noteEditContent').value = content;
+function editNote(el) {
+    document.getElementById('noteEditId').value = el.dataset.id;
+    document.getElementById('noteEditTitle').value = el.dataset.title;
+    document.getElementById('noteEditContent').value = (el.dataset.content || '').replace(/&#10;/g, '\n').replace(/&#39;/g, "'").replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
     document.getElementById('noteModal').classList.add('open');
 }
 function closeNoteModal() { document.getElementById('noteModal').classList.remove('open'); }
